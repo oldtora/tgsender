@@ -10,10 +10,25 @@ GROUPS_FILE = "groups.txt"
 PHRASES_FILE = "phrases.txt"
 IMAGE_FOLDER = "images"
 
-# Загрузка данных
-accounts = load_accounts(ACCOUNTS_FILE)
-groups = load_groups(GROUPS_FILE)
-phrases = load_phrases(PHRASES_FILE)
+# Загрузка данных с обработкой ошибок
+try:
+    accounts = load_accounts(ACCOUNTS_FILE)
+    groups = load_groups(GROUPS_FILE)
+    phrases = load_phrases(PHRASES_FILE)
+except Exception as e:
+    print(f"Ошибка загрузки данных: {e}")
+    exit(1)
+
+# Проверка данных
+if not accounts:
+    print("Ошибка: файл 'accounts.txt' пуст или отсутствует.")
+    exit(1)
+if not groups:
+    print("Ошибка: файл 'groups.txt' пуст или отсутствует.")
+    exit(1)
+if not phrases:
+    print("Ошибка: файл 'phrases.txt' пуст или отсутствует.")
+    exit(1)
 
 # Создание клиентов
 clients = [TelegramClient(acc['session'], acc['api_id'], acc['api_hash']) for acc in accounts]
@@ -83,15 +98,19 @@ async def send_random_comment(event, client):
 
 # Основная функция
 async def main():
-    await asyncio.gather(*(client.start() for client in clients))
+    try:
+        await asyncio.gather(*(client.start() for client in clients))
 
-    for client in clients:
-        @client.on(events.NewMessage(chats=groups))
-        async def new_post_handler(event):
-            await send_random_comment(event, client)
+        for client in clients:
+            @client.on(events.NewMessage(chats=groups))
+            async def new_post_handler(event):
+                await send_random_comment(event, client)
 
-    print("Запуск мониторинга...")
-    await asyncio.gather(*(client.run_until_disconnected() for client in clients))
+        print("Запуск мониторинга...")
+        await asyncio.gather(*(client.run_until_disconnected() for client in clients))
+    except Exception as e:
+        print(f"Ошибка в основном процессе: {e}")
+        exit(1)
 
 # Запуск
 asyncio.run(main())
