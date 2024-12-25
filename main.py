@@ -1,105 +1,71 @@
-from telethon import TelegramClient, events
-import random
-import os
-import asyncio
-from utils import load_accounts, load_groups, load_phrases, send_alert
-
-# Путь к файлам
-ACCOUNTS_FILE = "accounts.txt"
-GROUPS_FILE = "groups.txt"
-PHRASES_FILE = "phrases.txt"
-IMAGE_FOLDER = "images"
-
-# Загрузка данных с обработкой ошибок
-try:
-    accounts = load_accounts(ACCOUNTS_FILE)
-    groups = load_groups(GROUPS_FILE)
-    phrases = load_phrases(PHRASES_FILE)
-except Exception as e:
-    print(f"Ошибка загрузки данных: {e}")
-    exit(1)
-
-# Проверка данных
-if not accounts:
-    print("Ошибка: файл 'accounts.txt' пуст или отсутствует.")
-    exit(1)
-if not groups:
-    print("Ошибка: файл 'groups.txt' пуст или отсутствует.")
-    exit(1)
-if not phrases:
-    print("Ошибка: файл 'phrases.txt' пуст или отсутствует.")
-    exit(1)
-
-# Создание клиентов
-clients = [TelegramClient(acc['session'], acc['api_id'], acc['api_hash']) for acc in accounts]
-
 # Рандомизация данных
-def get_random_account():
-    return random.choice(clients)
-
 def get_random_phrase():
     return random.choice(phrases)
-
-def get_random_image():
-    files = [f for f in os.listdir(IMAGE_FOLDER) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
-    return os.path.join(IMAGE_FOLDER, random.choice(files)) if files else None
-
-# Проверка подписки и бана
-async def check_membership(client, chat):
-    try:
-        participant = await client.get_participants(chat, filter=telethon.tl.types.ChannelParticipantsSelf)
-        if participant:
-            return "subscribed"
-    except telethon.errors.ChatAdminRequiredError:
-        return "banned"
-    except telethon.errors.UserNotParticipantError:
-        return "not_subscribed"
-
-# Подписка на канал
-async def subscribe_to_channel(client, chat):
-    try:
-        await client(telethon.tl.functions.channels.JoinChannelRequest(chat))
-        return True
-    except Exception as e:
-        print(f"Ошибка подписки: {e}")
-        return False
 
 # Отправка комментария
 async def send_random_comment(event, client):
     try:
-        # Проверка подписки и бана
-        membership_status = await check_membership(client, event.chat_id)
-        if membership_status == "not_subscribed":
-            subscribed = await subscribe_to_channel(client, event.chat_id)
-            if not subscribed:
-                send_alert(f"Не удалось подписаться на канал {event.chat_id}")
+        comment = get_random_phrase()  # Получаем случайную фразу из phrases.txt
+
+        # Проверяем, является ли аккаунт участником канала
+        try:
+            await client.get_participants(event.chat_id)
+            print(f"[{client.session.filename}] Аккаунт уже находится в канале.")
+        except Exception:
+            print(f"[{client.session.filename}] Аккаунт не в канале. Присоединяюсь...")
+            try:
+                await client(JoinChannelRequest(event.chat_id))  # Присоединяемся к каналу
+                print(f"[{client.session.filename}] Успешно присоединился к каналу.")
+                await asyncio.sleep(5)  # Задержка для обработки
+            except Exception as e:
+                print(f"[{client.session.filename}] Ошибка при присоединении к каналу: {e}")
                 return
 
-        if membership_status == "banned":
-            send_alert(f"Аккаунт {client.session_name} забанен в {event.chat_id}. Смена аккаунта.")
+        # Получаем информацию о группе обсуждений
+        try:
+            discussion = await client(GetDiscussionMessageRequest(
+                peer=event.chat_id,  # Канал
+                msg_id=event.message.id  # ID сообщения в канале
+            ))
+            discussion_group_id = discussion.messages[0].peer_id.channel_id  # ID группы обсуждений
+            reply_to_msg_id = discussion.messages[0].id  # ID сообщения в группе обсуждений
+        except Exception as e:
+            print(f"[{client.session.filename}] Не удалось получить привязанную группу обсуждений: {e}")
             return
 
-        # Отправка комментария
-        comment = get_random_phrase()
-        image_path = get_random_image()
-        if image_path:
-            await client.send_file(
-                entity=event.chat,
-                file=image_path,
-                caption=comment,
-                comment_to=event.message.id
-            )
-            print(f"[{client.session_name}] Отправлен комментарий с изображением: '{comment}'")
-        else:
-            send_alert(f"Ошибка: нет изображений для отправки!")
+        # Проверяем, является ли аккаунт участником группы обсуждений
+        try:
+            await client.get_participants(discussion_group_id)
+            print(f"[{client.session.filename}] Аккаунт уже находится в группе обсуждений.")
+        except Exception:
+            print(f"[{client.session.filename}] Аккаунт не в группе обсуждений. Присоединяюсь...")
+            try:
+                await client(JoinChannelRequest(discussion_group_id))  # Присоединяемся к группе обсуждений
+                print(f"[{client.session.filename}] Успешно присоединился к группе обсуждений.")
+                await asyncio.sleep(10)  # Задержка для обработки присоединения
+            except Exception as e:
+                print(f"[{client.session.filename}] Ошибка при присоединении к группе обсуждений: {e}")
+                return
+
+        # Отправляем комментарий
+        await client.send_message(
+            entity=discussion_group_id,  # Группа обсуждений
+            message=comment,  # Текст комментария
+            reply_to=reply_to_msg_id  # Привязка к сообщению
+        )
+        print(f"[{client.session.filename}] Отправлен комментарий: '{comment}'")
     except Exception as e:
-        send_alert(f"Ошибка отправки комментария: {e}")
-        print(f"Ошибка: {e}")
+        print(f"[{client.session.filename}] Ошибка отправки комментария: {e}")
 
 # Основная функция
 async def main():
     try:
-        await asyncio.gather(*(client.start() for client in clients))
+        # Старт всех клиентов
+        for client in clients:
+            await client.connect()
+            if not await client.is_user_authorized():
+                print(f"Сессия для {client.session.filename} не авторизована. Проверьте файл сессии!")
+                exit(1)
 
         for client in clients:
             @client.on(events.NewMessage(chats=groups))
